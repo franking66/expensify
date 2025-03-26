@@ -1,0 +1,49 @@
+Expensify Take-Home Assignment: Design & Implementation
+
+Abstract
+This document outlines the design and implementation details of the Expensify take-home assignment.
+
+Part I. Scope of The Assignment
+
+1. Provided Infrastructure
+   Four Ubuntu servers prebuilt with core OS images:
+   Public IP       Internal IP
+   35.90.45.219    172.30.0.162
+   54.68.212.0     172.30.0.203
+   18.237.177.17   172.30.0.51
+   34.219.183.229  172.30.0.247
+
+2. Objectives
+Build a load-balanced and secure environment with the following specifications:
+
+ 1) Load Balancing:
+      Implement any suitable balancing strategy (e.g., round robin, random, load-based).
+      Ensure session stickiness is enabled (i.e., sticky sessions).
+      The original client IP must be passed to the backend web servers.
+      Forward TCP ports 60000–65000 on the load balancer to port 80 on the web servers.
+
+ 2) Monitoring:
+      Deploy a Nagios server to monitor the full stack.
+      Configure Nagios to issue alerts for both warnings and failures.
+
+ 3) User Management:
+      Add a user named expensify.
+      Grant sudo privileges.
+      Set up authentication via SSH public key.
+
+ 4) Network Security:
+      Configure a single public SSH access point (i.e., a jump server) for administrative access to all other instances.
+      Disable or remove all unnecessary and unused ports.
+
+
+
+
+
+Part II. 
+   
+
+   
+
+   
+
+
