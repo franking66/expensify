@@ -1,0 +1,45 @@
+---
+- name: Create 1GB Swap File on Nagios Server
+  hosts: all
+  become: true
+  collections:
+    - ansible.posix
+  tasks:
+
+    - name: Check if /swapfile already exists
+      stat:
+        path: /swapfile
+      register: swapfile_status
+
+    - name: Create 1GB swapfile using dd
+      command: dd if=/dev/zero of=/swapfile bs=1M count=1024
+      when: not swapfile_status.stat.exists
+
+    - name: Set permissions on /swapfile
+      file:
+        path: /swapfile
+        mode: '0600'
+        owner: root
+        group: root
+
+    - name: Format the swapfile
+      command: mkswap /swapfile
+      when: not swapfile_status.stat.exists
+
+    - name: Enable the swapfile
+      command: swapon /swapfile
+      register: swapon_result
+      failed_when: "'failed' in swapon_result.stderr"
+
+    - name: Backup /etc/fstab before modifying
+      copy:
+        src: /etc/fstab
+        dest: /etc/fstab.bak
+        remote_src: yes
+        backup: yes
+
+    - name: Ensure /swapfile entry exists in /etc/fstab
+      lineinfile:
+        path: /etc/fstab
+        line: '/swapfile none swap sw 0 0'
+        state: present

@@ -7,11 +7,12 @@ Part I. Scope of The Assignment
 
 1. Provided Infrastructure
    Four Ubuntu servers prebuilt with core OS images:
-   Public IP       Internal IP
-   35.90.45.219    172.30.0.162
-   54.68.212.0     172.30.0.203
-   18.237.177.17   172.30.0.51
-   34.219.183.229  172.30.0.247
+
+   Public IP        Internal IP
+   35.90.45.219     172.30.0.162
+   54.68.212.0      172.30.0.203
+   18.237.177.17    172.30.0.51
+   34.219.183.229   172.30.0.247
 
 2. Objectives
 Build a load-balanced and secure environment with the following specifications:
@@ -39,11 +40,15 @@ Build a load-balanced and secure environment with the following specifications:
 
 
 
-Part II. 
+Part II.
    
 
    
 
-   
+   Public IP       Internal IP     Role           Hostname
+   35.90.45.219    172.30.0.162    Web Server A   web-server-a
+   54.68.212.0     172.30.0.203    Web Server B   web-server-b
+   18.237.177.1    172.30.0.51     Load Balancer  load-balancer
+   34.219.183.229  172.30.0.247    Nagios Server  nagios
 
 
