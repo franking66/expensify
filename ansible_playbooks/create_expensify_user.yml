@@ -1,0 +1,29 @@
+---
+- hosts: all
+  become: true
+  vars:
+    username: expensify
+    authorized_keys_file: /home/franking/E/infra_team_authorized_keys
+
+  tasks:
+  - name: "Ensure user '{{ username }}' exists and is added to sudo group"
+    user:
+      name: "{{ username }}"
+      state: present
+      groups: sudo
+      append: yes
+      shell: /bin/bash
+      create_home: yes
+
+  - name: "Set up authorized SSH keys for '{{ username }}'"
+    authorized_key:
+      user: "{{ username }}"
+      state: present
+      key: "{{ lookup('file', authorized_keys_file) }}"
+
+  - name: "Allow '{{ username }}' to run sudo without password"
+    copy:
+      dest: "/etc/sudoers.d/{{ username }}"
+      content: "{{ username }} ALL=(ALL:ALL) NOPASSWD:ALL"
+      mode: '0440'
+
