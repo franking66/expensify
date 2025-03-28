@@ -15,40 +15,142 @@ Part I. Scope of The Assignment
    34.219.183.229   172.30.0.247
 
 2. Objectives
-Build a load-balanced and secure environment with the following specifications:
+   Build a load-balanced and secure environment with the following specifications:
 
  1) Load Balancing:
-      Implement any suitable balancing strategy (e.g., round robin, random, load-based).
-      Ensure session stickiness is enabled (i.e., sticky sessions).
-      The original client IP must be passed to the backend web servers.
-      Forward TCP ports 60000–65000 on the load balancer to port 80 on the web servers.
+    Implement any suitable balancing strategy (e.g., round robin, random, load-based).
+    Ensure session stickiness is enabled (i.e., sticky sessions).
+    The original client IP must be passed to the backend web servers.
+    Forward TCP ports 60000–65000 on the load balancer to port 80 on the web servers.
 
  2) Monitoring:
-      Deploy a Nagios server to monitor the full stack.
-      Configure Nagios to issue alerts for both warnings and failures.
+    Deploy a Nagios server to monitor the full stack.
+    Configure Nagios to issue alerts for both warnings and failures.
 
  3) User Management:
-      Add a user named expensify.
-      Grant sudo privileges.
-      Set up authentication via SSH public key.
+    Add a user named expensify.
+    Grant sudo privileges.
+    Set up authentication via SSH public key.
 
  4) Network Security:
-      Configure a single public SSH access point (i.e., a jump server) for administrative access to all other instances.
-      Disable or remove all unnecessary and unused ports.
+    Configure a single public SSH access point (i.e., a jump server) for administrative access to all other instances.
+    Disable or remove all unnecessary and unused ports.
 
 
 
 
+Part II. Design
 
-Part II.
-   
+Load Balancer: HAproxy
+This assignment requires Sticky Sessions. Out of the box, HAProxy supports cookie-based sticky sessions. This means it can maintain session persistence effectively, ensuring that a client consistently reaches the same backend server unless it goes down—a feature that might require additional modules or workarounds in Nginx.
 
-   
+In this assignment, load balancer needs to listen on a wide port range (60000–65000), then forward traffic to the web servers on port 80. HAProxy Port Range Binding handles such non-standard setups very well, ensuring a clean and efficient traffic flow.
 
-   Public IP       Internal IP     Role           Hostname
-   35.90.45.219    172.30.0.162    Web Server A   web-server-a
-   54.68.212.0     172.30.0.203    Web Server B   web-server-b
-   18.237.177.1    172.30.0.51     Load Balancer  load-balancer
-   34.219.183.229  172.30.0.247    Nagios Server  nagios
+In addition, HAProxy offers a wide variety of load balancing algorithms (round robin, least connections, source-based, etc.) that can be fine-tuned to the application’s needs. It’s designed to handle high volumes of connections efficiently.
+
+Web Server: Apache
+HAProxy and Apache work well together for implementing sticky sessions. Sticky sessions are primarily handled by HAProxy, which can be configured to use methods like cookie-based persistence or source IP-based balancing to ensure that a client consistently reaches the same backend server. Apache itself doesn’t enforce stickiness but can support it by serving static content and, if needed, setting cookies through its modules. Apache is widely available on Ubuntu and can be quickly set up to serve a basic static HTML file, making it ideal for this demonstration. Although Apache uses a process-driven or thread-driven model (using MPMs like prefork or worker), which may lead to higher memory consumption under heavy load, this is not a concern in a small-scale demo environment.
+
+
+
+
+Part III. Implementation
+
+System Assignment:
+Public IP       Internal IP     Role           Hostname
+35.90.45.219    172.30.0.162    Web Server A   web-server-a
+54.68.212.0     172.30.0.203    Web Server B   web-server-b
+18.237.177.17   172.30.0.51     Load Balancer  load-balancer
+34.219.183.229  172.30.0.247    Nagios Server  nagios-host
+
+Change server name accordingly:
+
+Apache Installation:
+Apache was installed, and configured using root UID on two servers.  “www-data” was created as a dedicated application account for Apache to run as. Created /var/www/html/index.html containing "Server A" or "B" depends on the server assignment above. Set owner and permission accordingly.
+
+HAproxy Installation:
+HAProxy was configured to accept traffic on port 80 and also a range of ports from 60000 to 65000. It forwards these incoming requests to two web servers in a round-robin fashion, maintains sticky sessions (meaning repeated requests from the same client are directed to the same backend server), and preserves the original client's IP address for logging purposes.
+
+     HAproxy.conf Breakdown:
+
+     # default settings; no changes are made
+     defaults
+         log     global
+         mode    http
+         option  httplog
+         option  dontlognull
+         option  forwardfor
+         timeout connect 5000
+         timeout client  50000
+         timeout server  50000
+
+     # The following section is for this assignment 
+     frontend web_front
+         bind *:80
+         bind *:60000-65000
+         default_backend web_back
+
+
+         # frontend web_front:
+         # Defines the frontend listener named web_front that accepts incoming requests.
+         # HAProxy listens on port 80 on all network interfaces for standard HTTP traffic.
+         # Additionally, binds HAProxy to a large custom port range (60000–65000). 
+         # Any traffic hitting these ports is internally forwarded to port 80 of backend servers.
+
+
+     backend web_back
+         balance roundrobin
+         cookie SRV insert indirect nocache
+         server websrv_a 172.30.0.162:80 check cookie A
+         server websrv_b 172.30.0.203:80 check cookie B
+        
+         # Requests are distributed in a simple round-robin manner among web servers.
+         # HAProxy inserts a cookie named SRV into client responses to enable sticky sessions. Clients
+         # returning with this cookie will be routed to the same backend server repeatedly, ensuring session 
+         # persistence.
+         # insert: HAProxy injects the cookie automatically.
+         # indirect: Clients can't manipulate cookie directly; it references backend servers indirectly, 
+         # enhancing security.
+         # Enables health checks on the servers. HAProxy periodically verifies server availability and marks 
+         # servers as offline automatically if unresponsive.
+         # Identifies each backend server uniquely, associating them with the SRV cookie for sticky sessions.
+     
+
+Nagios Installation:
+
+Why use Nagios binary--it allows me to always install the very latest version of Nagios with all the newest features and bug fixes. It also gives me complete control over the compilation process, allowing me to enable or disable specific features and optimize the build for my environment.
+
+Why need Apache2--while the Nagios core monitoring engine doesn't inherently require Apache2, its essential and widely used web interface relies on a web server to function and be accessible to users through a web browser. Apache2 is a common and well-supported choice for this purpose on Ubuntu and other Linux distribution.
+
+Nagios user account
+The installation requires root privileges, the Nagios core process itself is typically configured to run under a dedicated, less privileged user account (nagios in our case) for security reasons. This principle of least privilege helps to limit the potential damage if the Nagios process were to be compromised.
+
+Problems:
+     The following command failed:
+     sudo ./configure --with-httpd-conf=/etc/apache2/sites-enabled
+     error: Cannot find ssl headers
+     
+     Solution: add missing lib
+          sudo apt install libssl-dev -y
+          make clean
+          make install
+          
+
+
+Post Installation Testing :
+
+Issues
+1) Misleading Dashboard Display
+The dashboard currently displays four servers and an additional entry labeled localhost, which may cause confusion. This occurs because the default Nagios installation includes a predefined configuration for a host named localhost, which refers to the Nagios server itself (i.e., the machine on which Nagios is running). In this setup, both nagios-host and localhost point to the same IP address (172.30.0.247), resulting in redundancy.
+
+Solution:
+To clean up the dashboard and eliminate the duplicate reference, modify the following configuration files:
+/usr/local/nagios/etc/objects/localhost.cfg
+/usr/local/nagios/etc/servers.cfg
+Remove or comment out the localhost definition from these files to prevent it from appearing on the dashboard.
+
+
+
+
 
 
