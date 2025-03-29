@@ -136,21 +136,192 @@ Problems:
           make install
           
 
+Creating Public Access Server (nagios-host):
+Nagios daemon runs on nagios-host and requires access to other servers. Therefore, nagios-host was designated as the public-facing SSH access point.
+Created a private/public key pair for the expensify account on nagios-host (with a passphrase).
+The public key was then distributed to the other three servers.
+Authorized users with SSH access to nagios-host can then SSH to the other servers as the expensify user.
+Ansible is installed on nagios-host for management purposes.
 
-Post Installation Testing :
+expensify@nagios-host:~$ ansible all  -i expensify.ini -u expensify -m shell -a "id"
+web-server-a | CHANGED | rc=0 >>
+uid=1001(expensify) gid=1001(expensify) groups=1001(expensify),27(sudo)
+load-balancer | CHANGED | rc=0 >>
+uid=1001(expensify) gid=1001(expensify) groups=1001(expensify),27(sudo)
+nagios-host | CHANGED | rc=0 >>
+uid=1002(expensify) gid=1002(expensify) groups=1002(expensify),27(sudo)
+web-server-b | CHANGED | rc=0 >>
+uid=1001(expensify) gid=1001(expensify) groups=1001(expensify),27(sudo)
 
-Issues
-1) Misleading Dashboard Display
+
+Network Access Control Implementation: 
+To enhance network security, the iptables firewall, native to the Ubuntu operating system, was implemented to restrict network access according to defined policies. UFW, an command line interface was used for this task. I also wrote an ansible playbook for this task. However, I decided not to use it since I did not have an environment to test my playbook first.
+
+Firewall Strategy Summary:
+Server	      SSH Access	         HTTP/HTTPS Access	      All Other Ports
+nagios-host	   Internal + Public	   Internal + Public	      Deny
+web-server-a	Internal only	      Internal only	         Deny
+web-server-b	Internal only	      Internal only	         Deny
+load-balancer	Internal only	      Internal only	         Deny
+
+
+On Nagios Server (nagios-host):
+# Set default policies
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+
+# Allow SSH, HTTP, and HTTPS from anywhere
+sudo ufw allow 22       # SSH from anywhere
+sudo ufw allow 80       # HTTP from anywhere
+sudo ufw allow 443      # HTTPS from anywhere (optional for this project)
+
+# Enable UFW
+sudo ufw enable
+
+
+On the Other Servers (web-server-a, web-server-b, load-balancer):
+# Set default policies
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+
+# Allow SSH, HTTP, and HTTPS only from internal network (172.30.0.0/24)
+sudo ufw allow from 172.30.0.0/24 to any port 22 proto tcp   # SSH internal only
+sudo ufw allow from 172.30.0.0/24 to any port 80 proto tcp     # HTTP internal only
+sudo ufw allow from 172.30.0.0/24 to any port 443 proto tcp    # HTTPS internal only
+
+# Enable UFW
+sudo ufw enable
+
+Incident Report:
+While attempting to secure nagios-host using UFW, the firewall was enabled before any rules were established. This action locked out access to the server, necessitating the deployment of a new instance. Lesson Learned: The proper procedure for using UFW is to first define the necessary firewall rules and then enable the UFW service. 
+
+
+
+
+
+Part IV. Findings from Post-Installation Testing
+
+1)Misleading Dashboard Display
 The dashboard currently displays four servers and an additional entry labeled localhost, which may cause confusion. This occurs because the default Nagios installation includes a predefined configuration for a host named localhost, which refers to the Nagios server itself (i.e., the machine on which Nagios is running). In this setup, both nagios-host and localhost point to the same IP address (172.30.0.247), resulting in redundancy.
 
 Solution:
-To clean up the dashboard and eliminate the duplicate reference, modify the following configuration files:
-/usr/local/nagios/etc/objects/localhost.cfg
-/usr/local/nagios/etc/servers.cfg
-Remove or comment out the localhost definition from these files to prevent it from appearing on the dashboard.
+Eliminated duplicate localhost entries from the Nagios dashboard. The localhost definition was removed or commented out in /usr/local/nagios/etc/objects/localhost.cfg and /usr/local/nagios/etc/servers.cfg.
+
+2)Nagios Alert: "Swap Usage CRITICAL" was observed on the Nagios Dashboard. 
+Supporting Evidence: Ansible output indicated a lack of swap configuration on these systems.
+
+[franking@insprionlinux E]$ ansible all  -i expensify.ini -u ubuntu -m shell -a "free -k &&echo ' '" -b -e "ansible_become_pass=$PASS"
+web-server-a | CHANGED | rc=0 >>
+              total        used        free      shared  buff/cache   available
+Mem:         951568      185904      148864        1216      616800      595048
+Swap:             0           0           0
+
+nagios | CHANGED | rc=0 >>
+              total        used        free      shared  buff/cache   available
+Mem:         951568      205064       70060        3412      676444      563812
+Swap:             0           0           0
+
+load-balancer | CHANGED | rc=0 >>
+              total        used        free      shared  buff/cache   available
+Mem:         951568      248428       66284         880      636856      532776
+Swap:             0           0           0
+
+web-server-b | CHANGED | rc=0 >>
+              total        used        free      shared  buff/cache   available
+Mem:         951568      180368      181164        1216      590036      601992
+Swap:             0           0           0
+
+Solution: 
+A 1GB swap file was added to the system. This is recommended when total system RAM is less than 4GB.
+The ansible playbook: create_1g_swapfile.yml was created for this task.
+This playbook initially returned error: couldn't resolve module/action 'ansible.posix.mount'.
+
+   Fix: Using linefile instead of mount
+   - name: Ensure /swapfile entry exists in /etc/fstab
+     lineinfile:
+      path: /etc/fstab
+      line: '/swapfile none swap sw 0 0'
+      state: present
+
+   Rerun playbook:
+   [franking@insprionlinux E]$ ansible-playbook all -i expensify.ini create_1g_swapfile.yml   -u ubuntu  -b -e "ansible_become_pass=$PASS"
+
+   Ansible-playbook completed Successfully
+
+Swap validation:
+
+[franking@insprionlinux E]$ ansible all  -i expensify.ini -u ubuntu -m shell -a "swapon -s &&echo ' '" -b -e "ansible_become_pass=$PASS"
+web-server-a | CHANGED | rc=0 >>
+Filename                                Type            Size    Used    Priority
+/swapfile                               file            1048572 768     -2
+
+nagios | CHANGED | rc=0 >>
+Filename                                Type            Size    Used    Priority
+/swapfile                               file            1048572 1024    -2
+
+web-server-b | CHANGED | rc=0 >>
+Filename                                Type            Size    Used    Priority
+/swapfile                               file            1048572 256     -2
+
+load-balancer | CHANGED | rc=0 >>
+Filename                                Type            Size    Used    Priority
+/swapfile                               file            1048572 256     -2
+
+
+[franking@insprionlinux E]$ ansible all  -i expensify.ini -u ubuntu -m shell -a "free -k &&echo ' '" -b -e "ansible_become_pass=$PASS"
+web-server-a | CHANGED | rc=0 >>
+              total        used        free      shared  buff/cache   available
+Mem:         951568      179704       70296        1140      701568      598352
+Swap:       1048572         768     1047804
+
+load-balancer | CHANGED | rc=0 >>
+              total        used        free      shared  buff/cache   available
+Mem:         951568      243220       63608         780      644740      535344
+Swap:       1048572         256     1048316
+
+web-server-b | CHANGED | rc=0 >>
+              total        used        free      shared  buff/cache   available
+Mem:         951568      168460       71936        1140      711172      610136
+Swap:       1048572         256     1048316
+
+nagios | CHANGED | rc=0 >>
+              total        used        free      shared  buff/cache   available
+Mem:         951568      204548       61608        3388      685412      560476
+Swap:       1048572        1024     1047548
 
 
 
+[franking@insprionlinux E]$ ansible all  -i expensify.ini -u ubuntu -m shell -a "grep -i swap /etc/fstab&&echo ' '" -b -e "ansible_become_pass=$PASS"
+ 
+load-balancer | CHANGED | rc=0 >>
+/swapfile none swap sw 0 0
+
+web-server-a | CHANGED | rc=0 >>
+/swapfile none swap sw 0 0
+
+nagios | CHANGED | rc=0 >>
+/swapfile none swap sw 0 0
+
+web-server-b | CHANGED | rc=0 >>
+/swapfile none swap sw 0 0
+
+3)Nagios service monitoring was limited to nagios-host.
+Resolution: Modified servers.cfg to extend service status monitoring to web-server-a, web-server-b, and load-balancer.
+
+4)Initial Monitoring Scope: HAproxy monitoring was limited and did not cover HTTP stickiness or activity within the high port range (60000-65000). 
+
+Solution: The custom Python script check_haproxy_stickiness.py has been implemented to enhance monitoring capabilities. This script checks for the SRV cookie to determine stickiness (OK if found) and reports CRITICAL if stickiness is not functioning (no cookie or connection issues).
+
+   Observed Problem: The check_haproxy_stickiness.py script exhibited a failure to capture Set-Cookie headers. Technical Explanation: This occurs because HTTP responses may be segmented across multiple TCP segments. A single recv() call in the script might not retrieve the complete HTTP header containing the cookie information. curl's behavior of reading until the connection closes or a complete response is received mitigates this.
+
+   Resolution: The check_haproxy_stickiness.py script was modified to implement a loop that continues to receive and process incoming TCP packets until the presence of cookie data is confirmed.
+
+      while True:
+         data = sock.recv(4096).decode()
+         if not data:
+            break
+         response += data
+      sock.close()
 
 
 
